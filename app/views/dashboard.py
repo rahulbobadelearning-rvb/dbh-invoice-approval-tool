@@ -163,6 +163,8 @@ def _render_risk_panel(df: pd.DataFrame) -> None:
 
     c1, c2 = st.columns(2)
 
+    import html as _html
+
     with c1:
         if not at_risk.empty:
             st.markdown(
@@ -171,9 +173,13 @@ def _render_risk_panel(df: pd.DataFrame) -> None:
                 unsafe_allow_html=True,
             )
             for _, row in at_risk.iterrows():
+                # REMARK: Vendor Name is user-supplied — escape before rendering
+                # to prevent markdown injection (e.g. crafted names with [link](url)).
+                safe_name = _html.escape(str(row["Vendor Name"]))
+                safe_status = _html.escape(str(row["Runway Status"]))
+                safe_remaining = _html.escape(str(row["Remaining PO"]))
                 st.markdown(
-                    f"**{row['Vendor Name']}** — {row['Runway Status']} · "
-                    f"Remaining: {row['Remaining PO']}",
+                    f"**{safe_name}** — {safe_status} · Remaining: {safe_remaining}"
                 )
 
     with c2:
@@ -184,9 +190,9 @@ def _render_risk_panel(df: pd.DataFrame) -> None:
                 unsafe_allow_html=True,
             )
             for _, row in expiring_soon.iterrows():
-                st.markdown(
-                    f"**{row['Vendor Name']}** — expires {row['PO Expiration']}"
-                )
+                safe_name = _html.escape(str(row["Vendor Name"]))
+                safe_expiry = _html.escape(str(row["PO Expiration"]))
+                st.markdown(f"**{safe_name}** — expires {safe_expiry}")
 
 
 def _expires_within_60_days(expiry_str: str) -> bool:

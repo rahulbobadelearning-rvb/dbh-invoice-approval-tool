@@ -116,20 +116,27 @@ def _render_edit_form(vendor: dict) -> None:
             if not name.strip() or not code.strip():
                 st.error("Vendor Name and Vendor Code are required.")
             else:
+                from core.pdf_utils import validate_vendor_code
+                import sys
                 try:
+                    safe_code = validate_vendor_code(code)
                     update_vendor(
                         vendor_id=vendor["id"],
-                        vendor_name=name.strip(),
-                        vendor_code=code.strip().upper(),
-                        po_number=po_num.strip(),
+                        vendor_name=name.strip()[:200],
+                        vendor_code=safe_code,
+                        po_number=po_num.strip()[:100],
                         po_value=po_val,
                         po_expiration_date=expiry.strftime("%Y-%m-%d") if expiry else None,
-                        application_owner=owner.strip(),
+                        application_owner=owner.strip()[:200],
                     )
                     st.success("Vendor updated successfully.")
                     st.rerun()
+                except ValueError as exc:
+                    st.error(str(exc))
                 except Exception as exc:
-                    st.error(f"Update failed: {exc}")
+                    # Log full error server-side; show generic message to user
+                    print(f"[ERROR] Vendor update failed: {exc}", file=sys.stderr)
+                    st.error("Could not update vendor. Please check the input and try again.")
 
 
 # ---------------------------------------------------------------------------
@@ -158,6 +165,8 @@ def _render_add_form() -> None:
         submitted = st.form_submit_button("➕  Add Vendor", type="primary")
 
         if submitted:
+            from core.pdf_utils import validate_vendor_code
+            import sys
             errors = []
             if not name.strip():
                 errors.append("Vendor Name is required.")
@@ -166,20 +175,31 @@ def _render_add_form() -> None:
             if po_val <= 0:
                 errors.append("PO Value must be greater than 0.")
 
+            # Validate vendor code format to prevent path traversal
+            safe_code = None
+            if code.strip():
+                try:
+                    safe_code = validate_vendor_code(code)
+                except ValueError as exc:
+                    errors.append(str(exc))
+
             if errors:
                 for e in errors:
                     st.error(e)
             else:
                 try:
                     insert_vendor(
-                        vendor_name=name.strip(),
-                        vendor_code=code.strip().upper(),
-                        po_number=po_num.strip(),
+                        vendor_name=name.strip()[:200],
+                        vendor_code=safe_code,
+                        po_number=po_num.strip()[:100],
                         po_value=po_val,
                         po_expiration_date=expiry.strftime("%Y-%m-%d") if expiry else None,
-                        application_owner=owner.strip(),
+                        application_owner=owner.strip()[:200],
                     )
                     st.success(f"✅ Vendor **{name.strip()}** added successfully.")
                 except Exception as exc:
-                    # Most common failure: duplicate vendor_code
-                    st.error(f"Could not add vendor: {exc}")
+                    print(f"[ERROR] Vendor insert failed: {exc}", file=sys.stderr)
+                    if "UNIQUE constraint" in str(exc):
+                        st.error("A vendor with that code already exists. Use a different Vendor Code.")
+                    else:
+                        st.error("Could not add vendor. Please check the input and try again.")

@@ -68,6 +68,18 @@ def render() -> None:
         return
 
     file_bytes = uploaded.read()
+
+    # ── Server-side file validation ───────────────────────────────────────────
+    # REMARK: The browser's type=["pdf"] filter is a UX hint only — it can be
+    # bypassed.  We re-validate on the server using magic bytes and a hard size
+    # cap to prevent malformed files or oversized uploads from reaching the parser.
+    from core.pdf_utils import validate_pdf_bytes
+    try:
+        validate_pdf_bytes(file_bytes)
+    except ValueError as exc:
+        st.error(f"⛔ Upload rejected: {exc}")
+        return
+
     pdf_hash = compute_sha256(file_bytes)
 
     # ── Fast duplicate check on hash alone ──────────────────────────────────

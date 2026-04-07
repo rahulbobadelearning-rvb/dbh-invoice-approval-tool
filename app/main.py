@@ -1,5 +1,6 @@
 # REMARK: main.py is the single Streamlit entry point.
-# It owns: global CSS injection, DB initialisation, and sidebar navigation.
+# It owns: global CSS injection, DB initialisation, authentication gate,
+# and sidebar navigation.
 # All page logic lives in views/ (not pages/ — that name triggers Streamlit's
 # built-in multipage detection which would duplicate the navigation).
 
@@ -12,18 +13,15 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 import streamlit as st
 
+from core.auth import login_required, logout
 from core.db import initialize_database
 from core.ui_tokens import (
     COLOR_ACCENT,
-    COLOR_BG_APP,
-    COLOR_BG_CARD,
     COLOR_BORDER,
-    COLOR_TEXT_PRIMARY,
     COLOR_TEXT_SECONDARY,
     GLOBAL_CSS,
     SPACING_LG,
     SPACING_MD,
-    SPACING_SM,
 )
 
 # ── Page config — must be the first Streamlit call ───────────────────────────
@@ -40,6 +38,13 @@ st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
 # Ensure DB tables exist on every startup (idempotent)
 initialize_database()
 
+# ── Authentication gate ───────────────────────────────────────────────────────
+# REMARK: Nothing below this line executes unless the user is authenticated.
+# login_required() renders the login / setup screen and returns False when
+# the session is unauthenticated or timed out.
+if not login_required():
+    st.stop()
+
 # ── Sidebar navigation ────────────────────────────────────────────────────────
 NAV_ITEMS = [
     ("📊", "Dashboard"),
@@ -52,8 +57,10 @@ NAV_ITEMS = [
 with st.sidebar:
     st.markdown(
         f"""
-        <div style="padding-bottom:{SPACING_LG}px; border-bottom:1px solid {COLOR_BORDER}; margin-bottom:{SPACING_MD}px;">
-          <div style="font-size:1.15rem; font-weight:800; color:{COLOR_ACCENT}; letter-spacing:-0.01em;">
+        <div style="padding-bottom:{SPACING_LG}px; border-bottom:1px solid {COLOR_BORDER};
+                    margin-bottom:{SPACING_MD}px;">
+          <div style="font-size:1.15rem; font-weight:800; color:{COLOR_ACCENT};
+                      letter-spacing:-0.01em;">
             Invoice Approval
           </div>
           <div style="font-size:0.72rem; color:{COLOR_TEXT_SECONDARY}; text-transform:uppercase;
@@ -74,12 +81,21 @@ with st.sidebar:
         label_visibility="collapsed",
     )
 
-    st.markdown("<hr style='border:none; border-top:1px solid #D1D9E0; margin:24px 0 12px;'>", unsafe_allow_html=True)
     st.markdown(
-        f"<div style='font-size:0.68rem; color:{COLOR_TEXT_SECONDARY};'>"
-        "100 % local · no cloud · auditable</div>",
+        "<hr style='border:none; border-top:1px solid #D1D9E0; margin:24px 0 8px;'>",
         unsafe_allow_html=True,
     )
+    st.markdown(
+        f"<div style='font-size:0.68rem; color:{COLOR_TEXT_SECONDARY};'>"
+        "🔒 HTTPS · localhost only · no cloud</div>",
+        unsafe_allow_html=True,
+    )
+
+    # Logout button at the bottom of sidebar
+    st.markdown("<div style='margin-top:12px;'>", unsafe_allow_html=True)
+    if st.button("Sign Out", use_container_width=True, type="secondary"):
+        logout()
+    st.markdown("</div>", unsafe_allow_html=True)
 
 # ── Page routing ──────────────────────────────────────────────────────────────
 if selection == "Dashboard":

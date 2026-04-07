@@ -183,16 +183,27 @@ def _render_runway_gauge(vendor: dict, analytics: "VendorAnalytics", runway: "Ru
     st.plotly_chart(fig, use_container_width=True)
 
     # Runway detail rows
+    # REMARK: html.escape() applied to all user-supplied strings before they
+    # are embedded in an unsafe_allow_html block.  Numeric values are
+    # formatted by Python (not user-controlled) so they are safe as-is.
+    import html as _html
+    safe_expiry = _html.escape(str(vendor["po_expiration_date"] or "—"))
+    safe_months = _html.escape(str(runway.months_remaining if runway.months_remaining is not None else "—"))
+    safe_expected = _html.escape(
+        "${:,.0f}".format(runway.expected_monthly) if runway.expected_monthly else "—"
+    )
+    safe_status_badge = status_badge(runway.status)  # status_badge returns a fixed set of strings
+
     st.markdown(
         f"""
         <div style='font-size:0.82rem; line-height:1.8;'>
           <div><b>PO Value:</b> ${po_value:,.0f}</div>
           <div><b>YTD Spend:</b> ${ytd_spend:,.0f}</div>
           <div><b>Remaining:</b> ${runway.remaining_po:,.0f}</div>
-          <div><b>PO Expiration:</b> {vendor['po_expiration_date'] or '—'}</div>
-          <div><b>Months Left:</b> {runway.months_remaining if runway.months_remaining is not None else '—'}</div>
-          <div><b>Expected Monthly:</b> {'${:,.0f}'.format(runway.expected_monthly) if runway.expected_monthly else '—'}</div>
-          <div><b>Status:</b> {status_badge(runway.status)}</div>
+          <div><b>PO Expiration:</b> {safe_expiry}</div>
+          <div><b>Months Left:</b> {safe_months}</div>
+          <div><b>Expected Monthly:</b> {safe_expected}</div>
+          <div><b>Status:</b> {safe_status_badge}</div>
         </div>
         """,
         unsafe_allow_html=True,

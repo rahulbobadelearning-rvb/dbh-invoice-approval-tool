@@ -109,17 +109,24 @@ def render() -> None:
 
     with col_dl:
         if selected_row and selected_row["pdf_path"]:
-            pdf_path = Path(selected_row["pdf_path"])
-            if pdf_path.exists():
-                with open(pdf_path, "rb") as f:
-                    st.download_button(
-                        label="⬇️  Download PDF",
-                        data=f,
-                        file_name=pdf_path.name,
-                        mime="application/pdf",
-                    )
-            else:
-                st.warning("PDF file not found on disk.")
+            from core.pdf_utils import validate_download_path
+            try:
+                # REMARK: Validate the stored path is still inside PDF_STORAGE
+                # before opening it.  This prevents a tampered DB record from
+                # being used to read arbitrary files off the filesystem.
+                safe_path = validate_download_path(Path(selected_row["pdf_path"]))
+                if safe_path.exists():
+                    with open(safe_path, "rb") as f:
+                        st.download_button(
+                            label="⬇️  Download PDF",
+                            data=f,
+                            file_name=safe_path.name,
+                            mime="application/pdf",
+                        )
+                else:
+                    st.warning("PDF file not found on disk.")
+            except PermissionError:
+                st.error("⛔ Access denied: this file cannot be downloaded.")
         else:
             st.caption("No PDF attached to this invoice.")
 
