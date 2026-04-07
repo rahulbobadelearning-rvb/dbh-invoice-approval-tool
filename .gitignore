@@ -1,0 +1,19 @@
+# Local data — never commit real invoices or the DB
+data/invoices/
+data/app.db
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.env
+venv/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
