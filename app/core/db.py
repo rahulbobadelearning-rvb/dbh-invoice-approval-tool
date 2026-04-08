@@ -48,10 +48,16 @@ def initialize_database() -> None:
                 po_value            REAL    NOT NULL DEFAULT 0.0,
                 po_expiration_date  TEXT,           -- ISO YYYY-MM-DD
                 application_owner   TEXT,
+                country             TEXT,
                 created_at          TEXT    NOT NULL,
                 updated_at          TEXT    NOT NULL
             );
 
+        """)
+        # REMARK: Live migration — adds new columns to existing databases
+        # without requiring users to wipe and recreate their data.
+        _run_migrations(conn)
+        conn.executescript("""
             -- ── Invoice ledger ─────────────────────────────────────────────
             CREATE TABLE IF NOT EXISTS invoices (
                 id                  INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -66,6 +72,20 @@ def initialize_database() -> None:
                 FOREIGN KEY (vendor_id) REFERENCES vendors(id)
             );
         """)
+
+
+def _run_migrations(conn: sqlite3.Connection) -> None:
+    """Apply schema migrations for existing databases.  Each ALTER TABLE is
+    wrapped in try/except — SQLite raises OperationalError if the column
+    already exists, which we safely ignore."""
+    migrations = [
+        "ALTER TABLE vendors ADD COLUMN country TEXT",
+    ]
+    for sql in migrations:
+        try:
+            conn.execute(sql)
+        except sqlite3.OperationalError:
+            pass  # Column already present — nothing to do
 
 
 # ---------------------------------------------------------------------------
@@ -100,6 +120,7 @@ def insert_vendor(
     po_value: float,
     po_expiration_date: Optional[str],
     application_owner: str,
+    country: Optional[str] = None,
 ) -> int:
     ts = now_iso()
     with get_connection() as conn:
@@ -107,11 +128,11 @@ def insert_vendor(
             """
             INSERT INTO vendors
                 (vendor_name, vendor_code, po_number, po_value,
-                 po_expiration_date, application_owner, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                 po_expiration_date, application_owner, country, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (vendor_name, vendor_code, po_number, po_value,
-             po_expiration_date, application_owner, ts, ts),
+             po_expiration_date, application_owner, country, ts, ts),
         )
         return cursor.lastrowid  # type: ignore[return-value]
 
@@ -124,17 +145,18 @@ def update_vendor(
     po_value: float,
     po_expiration_date: Optional[str],
     application_owner: str,
+    country: Optional[str] = None,
 ) -> None:
     with get_connection() as conn:
         conn.execute(
             """
             UPDATE vendors
             SET vendor_name=?, vendor_code=?, po_number=?, po_value=?,
-                po_expiration_date=?, application_owner=?, updated_at=?
+                po_expiration_date=?, application_owner=?, country=?, updated_at=?
             WHERE id=?
             """,
             (vendor_name, vendor_code, po_number, po_value,
-             po_expiration_date, application_owner, now_iso(), vendor_id),
+             po_expiration_date, application_owner, country, now_iso(), vendor_id),
         )
 
 

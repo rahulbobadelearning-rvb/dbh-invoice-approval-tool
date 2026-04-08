@@ -1,9 +1,9 @@
-# REMARK: Search is intentionally read-heavy.  The user should be able
-# to find any past invoice in seconds, download the original PDF, and
-# delete records that were uploaded in error (with confirmation).
+# REMARK: Search gives the manager full read access — find, preview,
+# download, and delete any invoice record.
+# PDF viewer uses a base64-embedded iframe so no external server is needed.
 
+import base64
 from pathlib import Path
-from typing import Optional
 
 import pandas as pd
 import streamlit as st
@@ -16,7 +16,7 @@ def render() -> None:
     st.markdown(
         "<h1 style='font-size:1.6rem; font-weight:800; margin-bottom:4px;'>Invoice Search</h1>"
         f"<p style='color:{COLOR_TEXT_SECONDARY}; font-size:0.85rem; margin-top:0;'>"
-        "Search, download, and manage uploaded invoices.</p>",
+        "Search, preview, download, and manage uploaded invoices.</p>",
         unsafe_allow_html=True,
     )
 
@@ -26,16 +26,13 @@ def render() -> None:
     vendor_options.update({f"{v['vendor_name']} ({v['vendor_code']})": v["id"] for v in vendors})
 
     col1, col2, col3 = st.columns([2, 2, 2])
-
     with col1:
         vendor_label = st.selectbox("Vendor", list(vendor_options.keys()))
         vendor_id = vendor_options[vendor_label]
-
     with col2:
-        search_text = st.text_input("Invoice number / amount", placeholder="INV-001 or 12500…")
-
+        search_text = st.text_input("Invoice number / amount",
+                                     placeholder="INV-001 or 12500…")
     with col3:
-        # Month range filter (YYYY-MM)
         from datetime import datetime
         current_year = datetime.now().year
         month_opts = ["All Months"] + [
@@ -45,7 +42,7 @@ def render() -> None:
         ]
         selected_month = st.selectbox("Service Month", month_opts)
 
-    # ── Fetch and filter ──────────────────────────────────────────────────────
+    # ── Fetch & filter ────────────────────────────────────────────────────────
     rows = list_invoices(vendor_id=vendor_id)
 
     if not rows:
@@ -54,7 +51,6 @@ def render() -> None:
 
     df = _build_display_df(rows)
 
-    # Text filter
     if search_text:
         mask = (
             df["Invoice No"].str.contains(search_text, case=False, na=False)
@@ -62,36 +58,36 @@ def render() -> None:
         )
         df = df[mask]
 
-    # Month filter
     if selected_month != "All Months":
         df = df[df["Service Month"] == selected_month]
 
-    # ── Results summary ───────────────────────────────────────────────────────
-    total_amount = 0.0
-    for row in rows:
-        total_amount += row["invoice_amount"]
-
+    # ── Summary ───────────────────────────────────────────────────────────────
+    total_shown = df["_amount_raw"].sum() if not df.empty else 0.0
     col_a, col_b = st.columns([3, 1])
     with col_a:
         st.caption(f"Showing **{len(df)}** of **{len(rows)}** invoices")
     with col_b:
-        st.caption(f"Total visible: **${df['_amount_raw'].sum():,.2f}**" if not df.empty else "")
+        if not df.empty:
+            st.caption(f"Total: **${total_shown:,.2f}**")
 
-    # ── Table ─────────────────────────────────────────────────────────────────
     if df.empty:
         st.warning("No invoices match the current filters.")
         return
 
-    display_cols = ["Vendor", "Code", "Invoice No", "Invoice Date", "Service Month", "Amount", "Uploaded"]
-    st.dataframe(df[display_cols], use_container_width=True, hide_index=True, height=420)
+    # ── Table ─────────────────────────────────────────────────────────────────
+    display_cols = ["Vendor", "Code", "Invoice No", "Invoice Date",
+                    "Service Month", "Amount", "Uploaded"]
+    st.dataframe(df[display_cols], use_container_width=True,
+                 hide_index=True, height=360)
 
     # ── Row-level actions ─────────────────────────────────────────────────────
     st.markdown("<hr class='mds-divider'>", unsafe_allow_html=True)
-    st.markdown("<div class='mds-section-title'>Actions</div>", unsafe_allow_html=True)
+    st.markdown("<div class='mds-section-title'>Actions</div>",
+                unsafe_allow_html=True)
 
-    # Build label map from visible rows (using original db id)
     id_options = {
-        f"#{r['id']} — {r['vendor_name']} | {r['invoice_number'] or 'No No.'} | {r['service_month']} | ${r['invoice_amount']:,.2f}": r["id"]
+        f"#{r['id']} — {r['vendor_name']} | {r['invoice_number'] or 'No No.'} | "
+        f"{r['service_month']} | ${r['invoice_amount']:,.2f}": r["id"]
         for r in rows
         if str(r["id"]) in df["_id"].values
     }
@@ -101,37 +97,37 @@ def render() -> None:
 
     selected_label = st.selectbox("Select invoice", list(id_options.keys()))
     selected_id = id_options[selected_label]
-
-    # Find the row
     selected_row = next((r for r in rows if r["id"] == selected_id), None)
 
-    col_dl, col_del = st.columns([1, 1])
+    # Three action buttons
+    col_view, col_dl, col_del = st.columns([1, 1, 1])
+
+    with col_view:
+        view_clicked = st.button("👁️  View PDF", use_container_width=True)
 
     with col_dl:
         if selected_row and selected_row["pdf_path"]:
             from core.pdf_utils import validate_download_path
             try:
-                # REMARK: Validate the stored path is still inside PDF_STORAGE
-                # before opening it.  This prevents a tampered DB record from
-                # being used to read arbitrary files off the filesystem.
                 safe_path = validate_download_path(Path(selected_row["pdf_path"]))
                 if safe_path.exists():
-                    with open(safe_path, "rb") as f:
-                        st.download_button(
-                            label="⬇️  Download PDF",
-                            data=f,
-                            file_name=safe_path.name,
-                            mime="application/pdf",
-                        )
+                    pdf_bytes = safe_path.read_bytes()
+                    st.download_button(
+                        label="⬇️  Download PDF",
+                        data=pdf_bytes,
+                        file_name=safe_path.name,
+                        mime="application/pdf",
+                        use_container_width=True,
+                    )
                 else:
-                    st.warning("PDF file not found on disk.")
+                    st.warning("PDF not found on disk.")
             except PermissionError:
-                st.error("⛔ Access denied: this file cannot be downloaded.")
+                st.error("⛔ Access denied.")
         else:
-            st.caption("No PDF attached to this invoice.")
+            st.caption("No PDF attached.")
 
     with col_del:
-        if st.button("🗑️  Delete this invoice", type="secondary"):
+        if st.button("🗑️  Delete Invoice", type="secondary", use_container_width=True):
             if st.session_state.get("confirm_delete") == selected_id:
                 delete_invoice(selected_id)
                 st.session_state.pop("confirm_delete", None)
@@ -139,7 +135,51 @@ def render() -> None:
                 st.rerun()
             else:
                 st.session_state["confirm_delete"] = selected_id
-                st.warning("Click delete again to confirm deletion.")
+                st.warning("Click **Delete Invoice** again to confirm.")
+
+    # ── Inline PDF viewer ─────────────────────────────────────────────────────
+    if view_clicked and selected_row and selected_row["pdf_path"]:
+        _render_pdf_viewer(selected_row)
+
+
+# ---------------------------------------------------------------------------
+# PDF inline viewer
+# ---------------------------------------------------------------------------
+
+def _render_pdf_viewer(row: dict) -> None:
+    from core.pdf_utils import validate_download_path
+    st.markdown("<hr class='mds-divider'>", unsafe_allow_html=True)
+    st.markdown("<div class='mds-section-title'>PDF Preview</div>",
+                unsafe_allow_html=True)
+    st.caption(
+        f"**{row['vendor_name']}** · Invoice {row['invoice_number'] or '—'} · "
+        f"{row['service_month']} · ${row['invoice_amount']:,.2f}"
+    )
+
+    try:
+        safe_path = validate_download_path(Path(row["pdf_path"]))
+        if not safe_path.exists():
+            st.warning("PDF file not found on disk.")
+            return
+        pdf_bytes = safe_path.read_bytes()
+        b64 = base64.b64encode(pdf_bytes).decode("utf-8")
+        # REMARK: Embed as data URI in an iframe — works in all modern browsers
+        # with no external server needed.  Chrome/Edge may require the user to
+        # click "Allow" for inline PDFs from data URIs.
+        pdf_html = (
+            f'<iframe src="data:application/pdf;base64,{b64}" '
+            f'width="100%" height="720px" '
+            f'style="border:1px solid #D1D9E0; border-radius:8px;" '
+            f'type="application/pdf">'
+            f'<p>Your browser does not support inline PDF viewing. '
+            f'Use the Download button above.</p>'
+            f'</iframe>'
+        )
+        st.markdown(pdf_html, unsafe_allow_html=True)
+    except PermissionError:
+        st.error("⛔ Access denied: this file cannot be viewed.")
+    except Exception as exc:
+        st.error(f"Could not render PDF. Use the Download button instead.")
 
 
 # ---------------------------------------------------------------------------
@@ -149,17 +189,15 @@ def render() -> None:
 def _build_display_df(rows: list) -> pd.DataFrame:
     records = []
     for r in rows:
-        records.append(
-            {
-                "_id": str(r["id"]),
-                "_amount_raw": r["invoice_amount"],
-                "Vendor": r["vendor_name"],
-                "Code": r["vendor_code"],
-                "Invoice No": r["invoice_number"] or "—",
-                "Invoice Date": r["invoice_date"] or "—",
-                "Service Month": r["service_month"],
-                "Amount": f"${r['invoice_amount']:,.2f}",
-                "Uploaded": (r["upload_timestamp"] or "")[:10],
-            }
-        )
+        records.append({
+            "_id": str(r["id"]),
+            "_amount_raw": r["invoice_amount"],
+            "Vendor": r["vendor_name"],
+            "Code": r["vendor_code"],
+            "Invoice No": r["invoice_number"] or "—",
+            "Invoice Date": r["invoice_date"] or "—",
+            "Service Month": r["service_month"],
+            "Amount": f"${r['invoice_amount']:,.2f}",
+            "Uploaded": (r["upload_timestamp"] or "")[:10],
+        })
     return pd.DataFrame(records)

@@ -4,6 +4,7 @@ data/app.db
 
 # Security — never commit credentials, certs, or machine-specific config
 data/.credentials
+data/.smtp_config.json
 certs/
 .streamlit/config.toml
 

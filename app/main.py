@@ -52,6 +52,7 @@ NAV_ITEMS = [
     ("📤", "Upload Invoice"),
     ("🔍", "Invoice Search"),
     ("📈", "Vendor Detail"),
+    ("⚙️", "Settings"),
 ]
 
 with st.sidebar:
@@ -116,4 +117,8 @@ elif selection == "Invoice Search":
 
 elif selection == "Vendor Detail":
     from views.vendor_detail import render
+    render()
+
+elif selection == "Settings":
+    from views.settings import render
     render()
