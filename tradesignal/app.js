@@ -488,45 +488,20 @@ function showChartTip(clientX, canvas, tooltip) {
 }
 
 /* ============================================================
-   OPTIONS OPEN INTEREST
+   PRICE LEVEL TOUCHES
 ============================================================ */
-async function fetchOptionsOI(ticker) {
-  // Try both query endpoints for reliability
-  for (const host of ['query1', 'query2']) {
-    const url = `https://${host}.finance.yahoo.com/v7/finance/options/${ticker}?formatted=false`;
-    try {
-      const data   = await fetchJSON(url);
-      const result = data?.optionChain?.result?.[0];
-      if (!result) continue;
-      const opts = result.options?.[0];
-      if (!opts) continue;
-      const callsMap = {}, putsMap = {};
-      (opts.calls || []).forEach(c => { if (c.openInterest > 0) callsMap[c.strike] = c.openInterest; });
-      (opts.puts  || []).forEach(p => { if (p.openInterest > 0) putsMap[p.strike]  = p.openInterest; });
-      if (Object.keys(callsMap).length || Object.keys(putsMap).length) return { callsMap, putsMap };
-    } catch { /* try next */ }
+function countTouches(level, highs, lows) {
+  const tol = 0.015;
+  const n   = Math.min(60, highs.length);
+  let count = 0;
+  for (let i = highs.length - n; i < highs.length; i++) {
+    if (
+      Math.abs(highs[i] - level) / level <= tol ||
+      Math.abs(lows[i]  - level) / level <= tol ||
+      (highs[i] >= level && lows[i] <= level)
+    ) count++;
   }
-  return null;
-}
-
-function getOIForLevel(oiData, level, isResistance) {
-  if (!oiData) return null;
-  const map     = isResistance ? oiData.callsMap : oiData.putsMap;
-  const strikes = Object.keys(map).map(Number);
-  if (!strikes.length) return null;
-  let closest = strikes[0], minDiff = Math.abs(level - closest);
-  for (const s of strikes) {
-    const d = Math.abs(level - s);
-    if (d < minDiff) { minDiff = d; closest = s; }
-  }
-  return minDiff / level <= 0.04 ? map[closest] : null;
-}
-
-function fmtOI(oi) {
-  if (oi == null || oi === 0) return null;
-  if (oi >= 1_000_000) return (oi / 1_000_000).toFixed(1) + 'M OI';
-  if (oi >= 1_000)     return (oi / 1_000).toFixed(1)     + 'K OI';
-  return oi + ' OI';
+  return count;
 }
 
 /* ============================================================
@@ -548,7 +523,7 @@ function renderStockHeader(stock) {
   el.className   = 'stock-change ' + (chg >= 0 ? 'positive' : 'negative');
 }
 
-function renderPriceLadder(sr, currentPrice, oiData) {
+function renderPriceLadder(sr, currentPrice, stock) {
   const { supports, resistances } = sr;
   const rows = [
     ...resistances.slice().reverse().map((l, i) => ({ ...l, type:'resistance', label:`R${resistances.length - i}` })),
@@ -566,16 +541,19 @@ function renderPriceLadder(sr, currentPrice, oiData) {
         <div class="ladder-dots"></div>
         <span class="ladder-oi"></span>
       </div>`;
+
     const dist      = Math.abs(row.level - currentPrice);
     const distPct   = (dist / currentPrice * 100).toFixed(2);
     const barPct    = Math.round(dist / maxDist * 100);
     const arrow     = row.type === 'resistance' ? '↑' : '↓';
     const dots      = [1,2,3].map(i => `<div class="dot${i <= Math.min(row.strength,3) ? ' on':''}"></div>`).join('');
-    const isRes     = row.type === 'resistance';
-    const oi        = getOIForLevel(oiData, row.level, isRes);
-    const oiStr     = fmtOI(oi);
-    const oiColor   = isRes ? 'var(--bear)' : 'var(--bull)';
-    const oiBadge   = oiStr ? `<span class="ladder-oi" style="color:${oiColor}">${oiStr}</span>` : `<span class="ladder-oi"></span>`;
+    const isRes    = row.type === 'resistance';
+    const touches  = stock ? countTouches(row.level, stock.highs, stock.lows) : 0;
+    const oiColor  = isRes ? 'var(--bear)' : 'var(--bull)';
+    const opacity  = touches >= 4 ? '1' : touches >= 2 ? '0.75' : '0.45';
+    const oiBadge  = touches > 0
+      ? `<span class="ladder-oi" style="color:${oiColor};opacity:${opacity}">${touches}× tested</span>`
+      : `<span class="ladder-oi"></span>`;
     return `
       <div class="ladder-row ${row.type}">
         <span class="ladder-label">${row.label}</span>
@@ -713,12 +691,9 @@ async function analyze(ticker) {
     document.querySelectorAll('.period-btn').forEach(b =>
       b.classList.toggle('active', b.dataset.period === '1M'));
 
-    setLoadingMsg('Fetching options data…');
-    const oiData = await fetchOptionsOI(t);
-
     renderStockHeader(stock);
     drawChart(chartCache[`${t}_1M`], sr);
-    renderPriceLadder(sr, stock.currentPrice, oiData);
+    renderPriceLadder(sr, stock.currentPrice, stock);
     renderSentiment(sentiment);
     renderOptionsSignal(signal);
     renderIndicators(sentiment);
