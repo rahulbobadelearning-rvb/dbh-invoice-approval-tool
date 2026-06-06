@@ -319,7 +319,8 @@ let activeChart        = { ticker: '', period: '1M', sr: null, type: 'line', sto
 const activeIndicators = { ema20: true, ema50: true, ema200: false, bb: false };
 let lwChart            = null;
 let lwMainSeries       = null;
-let lwVolSeries        = null;
+let lwBuyVolSeries     = null;
+let lwSellVolSeries    = null;
 const lwInd            = {};
 
 function calcBB(closes, period = 20, mult = 2) {
@@ -363,7 +364,7 @@ function toggleIndicator(name) {
 
 function destroyLwChart() {
   if (lwChart) { lwChart.remove(); lwChart = null; }
-  lwMainSeries = null; lwVolSeries = null;
+  lwMainSeries = null; lwBuyVolSeries = null; lwSellVolSeries = null;
   Object.keys(lwInd).forEach(k => delete lwInd[k]);
 }
 
@@ -431,19 +432,32 @@ function drawChart(cd, sr) {
     },
   });
 
-  /* Volume — overlay in bottom 18% */
-  lwVolSeries = lwChart.addHistogramSeries({
-    priceFormat:      { type: 'volume' },
-    priceScaleId:     'vol',
-    lastValueVisible: false,
-    priceLineVisible: false,
+  /* Buy / sell volume split — Williams Buying Pressure: (close-low)/(high-low) × vol */
+  const buyVols  = volumes.map((v, i) => {
+    const range = highs[i] - lows[i];
+    return (range > 0 ? (closes[i] - lows[i]) / range : 0.5) * (v || 0);
   });
+  const sellVols = volumes.map((v, i) => (v || 0) - buyVols[i]);
+
+  /* Green series (full volume) rendered first (behind), red series (sell portion)
+     rendered second (on top of the lower part) → stacked buy/sell appearance */
+  const volHistOpts = { priceFormat: { type: 'volume' }, priceScaleId: 'vol',
+                        lastValueVisible: false, priceLineVisible: false };
+  lwBuyVolSeries  = lwChart.addHistogramSeries(volHistOpts);
+  lwSellVolSeries = lwChart.addHistogramSeries(volHistOpts);
   lwChart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.82, bottom: 0 }, visible: false });
-  lwVolSeries.setData(timestamps.map((ts, i) => ({
-    time:  toTime(ts),
-    value: volumes[i] || 0,
-    color: (i > 0 && closes[i] >= closes[i - 1]) ? 'rgba(0,212,170,0.22)' : 'rgba(255,75,75,0.22)',
+
+  lwBuyVolSeries.setData(timestamps.map((ts, i) => ({
+    time: toTime(ts), value: volumes[i] || 0, color: 'rgba(0,212,170,0.28)',
   })));
+  lwSellVolSeries.setData(timestamps.map((ts, i) => ({
+    time: toTime(ts), value: sellVols[i], color: 'rgba(255,75,75,0.42)',
+  })));
+
+  /* Time → index lookup for legend */
+  const timeToIdx = isIntraday
+    ? new Map(timestamps.map((ts, i) => [ts, i]))
+    : new Map(timestamps.map((ts, i) => [tsToDay(ts), i]));
 
   /* Main price series */
   if (activeChart.type === 'candle') {
@@ -562,6 +576,22 @@ function drawChart(cd, sr) {
     if (e200v != null) indParts.push(`<span class="leg-item" style="color:${CHART_COLORS.ema200}">EMA200 $${e200v.toFixed(2)}</span>`);
     if (bbUv  != null && bbLv != null) indParts.push(`<span class="leg-item" style="color:${CHART_COLORS.bbUpper}">BB ${bbLv.toFixed(2)}–${bbUv.toFixed(2)}</span>`);
 
+    /* Buy / sell pressure for hovered bar */
+    let volHtml = '';
+    const idx = param.time != null ? (timeToIdx.get(param.time) ?? -1) : -1;
+    if (idx >= 0 && volumes[idx] > 0) {
+      const totalV = volumes[idx];
+      const buyPct  = Math.round(buyVols[idx]  / totalV * 100);
+      const sellPct = 100 - buyPct;
+      const volFmt  = totalV >= 1e6 ? (totalV / 1e6).toFixed(1) + 'M'
+                    : totalV >= 1e3 ? (totalV / 1e3).toFixed(0) + 'K'
+                    : totalV.toFixed(0);
+      volHtml = `<span class="leg-buysell"><span style="color:#00d4aa">▲${buyPct}%</span>`
+              + `<span class="leg-vol-bar"><span style="width:${buyPct}%;background:#00d4aa"></span></span>`
+              + `<span style="color:#ff4b4b">▼${sellPct}%</span>`
+              + `<span class="leg-vol-total">${volFmt}</span></span>`;
+    }
+
     let dateHtml = '';
     if (param.time) {
       if (isIntraday) {
@@ -576,6 +606,7 @@ function drawChart(cd, sr) {
 
     leg.style.display = mainHtml ? '' : 'none';
     leg.innerHTML = `<div class="leg-row">${mainHtml}${indParts.join('')}</div>`
+      + (volHtml  ? volHtml  : '')
       + (dateHtml ? `<div class="leg-date">${dateHtml}</div>` : '');
   });
 
@@ -779,6 +810,10 @@ async function analyze(ticker) {
   if (!t) return;
   lastTicker = t;
   hideSuggestions();
+
+  // Clear any cached chart data so every Analyze press fetches fresh data
+  Object.keys(chartCache).filter(k => k.startsWith(t + '_')).forEach(k => delete chartCache[k]);
+
   setView('loading');
   setLoadingMsg('Connecting to market data…');
 

@@ -274,6 +274,36 @@ button { font-family:var(--font); }
 .leg-item  { font-size:10px; color:rgba(255,255,255,.55); }
 .leg-date  { font-size:10px; color:rgba(255,255,255,.32); margin-top:1px; }
 
+/* Buy / sell pressure row in legend */
+.leg-buysell {
+  display:flex;
+  align-items:center;
+  gap:5px;
+  font-size:10px;
+  font-weight:700;
+  margin-top:3px;
+}
+.leg-vol-bar {
+  flex:1;
+  height:3px;
+  background:rgba(255,75,75,.35);
+  border-radius:2px;
+  overflow:hidden;
+  min-width:36px;
+  max-width:72px;
+}
+.leg-vol-bar span {
+  display:block;
+  height:100%;
+  border-radius:2px;
+}
+.leg-vol-total {
+  font-size:9px;
+  color:rgba(255,255,255,.3);
+  font-weight:600;
+  margin-left:2px;
+}
+
 /* ============================================================
    CARDS
 ============================================================ */
